@@ -19,11 +19,13 @@ sys.path.append(str(model_dir))
 try:
     from fireredasr_aed_tensorrt import FireRedAsrAedTensorRT
     from asr_feat import ASRFeatExtractor
-    from aed_tokenizer import ChineseCharEnglishSpmTokenizer
+    from aed_tokenizer import ChineseCharEnglishSpmTokenizer, LidTokenizer
 except ImportError as e:
     print(f"Error importing model modules: {e}")
     print(f"Added path: {model_dir}")
     sys.exit(1)
+
+from ctc import CTC
 
 def get_args():
     parser = argparse.ArgumentParser(description="FireRedASR Inference")
@@ -70,10 +72,16 @@ def get_args():
         help="Num workers for dataloader"
     )
     parser.add_argument(
-        "--prefetch", 
-        type=int, 
-        default=5, 
+        "--prefetch",
+        type=int,
+        default=5,
         help="Prefetch factor for dataloader"
+    )
+    parser.add_argument(
+        "--ctc",
+        type=str,
+        default=None,
+        help="Path to CTC model weights (ctc.pt) for timestamp generation"
     )
     return parser.parse_args()
 
@@ -128,9 +136,19 @@ def main():
 
     dict_path = os.path.join(args.engine_dir, "dict.txt")
     spm_model = os.path.join(args.engine_dir, "train_bpe1000.model")
-    tokenizer = ChineseCharEnglishSpmTokenizer(dict_path, spm_model)
+    # if spm_model is not exist, use LidTokenizer
+    if not os.path.exists(spm_model):
+        tokenizer = LidTokenizer(dict_path)
+    else:
+        tokenizer = ChineseCharEnglishSpmTokenizer(dict_path, spm_model)
 
     model = FireRedAsrAedTensorRT.from_model_dir(args.engine_dir, tokenizer, device_id=device_id)
+
+    # Load CTC model for timestamp if specified
+    ctc_model = None
+    if args.ctc:
+        print(f"Loading CTC model from {args.ctc}")
+        ctc_model = CTC.from_pretrained(args.ctc, device_id=device_id)
 
     # Load Dataset
     print(f"Loading dataset: {args.huggingface_dataset} split: {args.split_name}")
@@ -162,24 +180,59 @@ def main():
     for batch_ids, batch_wavs in dataloader:
 
         feats_pad, lengths, durs = feat_extractor(batch_wavs)
-        
+
         # Inference
-        hyps_list = model.transcribe(
-            feats_pad, 
-            lengths,
-            beam_size=1,
-            nbest=1,
-            decode_max_len=0,
-            softmax_smoothing=1.0,
-            length_penalty=0.0,
-            eos_penalty=1.0
-        )
-        
+        if ctc_model is not None:
+            hyps_list, enc_outputs, enc_lengths = model.transcribe(
+                feats_pad,
+                lengths,
+                beam_size=1,
+                nbest=1,
+                decode_max_len=0,
+                softmax_smoothing=1.0,
+                length_penalty=0.0,
+                eos_penalty=1.0,
+                return_enc_output=True
+            )
+            # Compute CTC logits for timestamp
+            ctc_logits = ctc_model(enc_outputs)
+        else:
+            hyps_list = model.transcribe(
+                feats_pad,
+                lengths,
+                beam_size=1,
+                nbest=1,
+                decode_max_len=0,
+                softmax_smoothing=1.0,
+                length_penalty=0.0,
+                eos_penalty=1.0
+            )
+
         for i, hyp_list in enumerate(hyps_list):
             hyp = hyp_list[0]
             hyp_ids = [int(id) for id in hyp["yseq"].tolist()]
             text = tokenizer.detokenize(hyp_ids)
-            results.append(f"{batch_ids[i]}\t{text}")
+
+            # Compute timestamp if CTC is available
+            timestamp_str = ""
+            if ctc_model is not None:
+                try:
+                    n_ctc_logits = ctc_logits[i, :enc_lengths[i]]
+                    y = hyp["yseq"]
+                    y = y[y != 0]  # 0 is blank
+
+                    if y.numel() > 0 and n_ctc_logits.size(0) > 0 and y.numel() <= n_ctc_logits.size(0):
+                        alignment, _ = torchaudio.functional.forced_align(
+                            n_ctc_logits.unsqueeze(0), y.unsqueeze(0).to(n_ctc_logits.device), blank=0)
+                        alignment = alignment[0].cpu().tolist()
+                        start_times, end_times = CTC.ctc_alignment_to_timestamp(
+                            alignment, ctc_model.subsampling, blank_id=0)
+                        # Format timestamp as JSON-like string
+                        timestamp_str = f"\t{start_times}\t{end_times}"
+                except Exception as e:
+                    pass  # Skip timestamp on error
+
+            results.append(f"{batch_ids[i]}\t{text}{timestamp_str}")
 
         if rank == 0:
             progress_bar.update(len(batch_ids) * world_size)

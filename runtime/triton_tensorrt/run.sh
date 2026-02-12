@@ -57,12 +57,17 @@ if [ $stage -le 5 ] && [ $stop_stage -ge 5 ]; then
     subset_name=test
     split_name=test
 
+    # dataset_name="yuekai/speechio"
+    # subset_name="SPEECHIO_ASR_ZH00007"
+    # split_name="test"
+
     torchrun --nproc_per_node=1 \
         infer.py \
         --engine_dir ./FireRedASR2-AED-TensorRT \
         --huggingface_dataset $dataset_name \
         --subset_name $subset_name \
         --split_name $split_name \
+        --ctc ./FireRedASR2-AED-TensorRT/ctc.pt \
         --batch_size 64
 
 fi

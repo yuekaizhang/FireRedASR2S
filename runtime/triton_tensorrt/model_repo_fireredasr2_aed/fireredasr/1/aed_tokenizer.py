@@ -120,3 +120,16 @@ class ChineseCharEnglishSpmTokenizer:
         if replace_spm_space:
             s = s.replace(self.SPM_SPACE, ' ').strip()
         return s
+
+class LidTokenizer:
+
+    def __init__(self, dict_path, unk="<unk>"):
+        self.dict = TokenDict(dict_path, unk=unk)
+
+    def detokenize(self, inputs, join_symbol=" "):
+        if len(inputs) > 0 and type(inputs[0]) == int:
+            tokens = [self.dict[id] for id in inputs]
+        else:
+            tokens = inputs
+        s = f"{join_symbol}".join(tokens)
+        return s

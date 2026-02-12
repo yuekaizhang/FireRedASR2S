@@ -227,7 +227,8 @@ class FireRedAsrAedTensorRT(torch.nn.Module):
 
     def transcribe(self, padded_input, input_lengths,
                    beam_size=1, nbest=1, decode_max_len=0,
-                   softmax_smoothing=1.0, length_penalty=0.0, eos_penalty=1.0):
+                   softmax_smoothing=1.0, length_penalty=0.0, eos_penalty=1.0,
+                   return_enc_output=False):
         device = f'cuda:{self.device_id}'
         padded_input, input_lengths = padded_input.to(device), input_lengths.to(device)
         enc_outputs, enc_output_lengths, enc_mask = self.encoder.forward(padded_input.to(torch.float16).contiguous(), input_lengths.to(torch.int32).contiguous())
@@ -269,4 +270,6 @@ class FireRedAsrAedTensorRT(torch.nn.Module):
                 n_hyps.append({"yseq": token_ids})
             nbest_hyps.append(n_hyps)
 
+        if return_enc_output:
+            return nbest_hyps, enc_outputs.float(), encoder_output_lengths
         return nbest_hyps
