@@ -32,19 +32,19 @@ def get_args():
     parser.add_argument(
         "--engine_dir", 
         type=str, 
-        default="/workspace_yuekai/asr/FireRedASR/examples/FireRedASR-AED-L-TensorRT",
+        default="./FireRedASR2-AED-TensorRT",
         help="TensorRT engine directory"
     )
     parser.add_argument(
         "--huggingface_dataset", 
         type=str, 
-        required=True,
+        default="yuekai/aishell",
         help="Dataset name"
     )
     parser.add_argument(
         "--subset_name", 
         type=str, 
-        default=None, 
+        default="test", 
         help="Dataset subset name"
     )
     parser.add_argument(
@@ -62,7 +62,7 @@ def get_args():
     parser.add_argument(
         "--batch_size", 
         type=int, 
-        default=1, 
+        default=64, 
         help="Batch size (per-device)"
     )
     parser.add_argument(
