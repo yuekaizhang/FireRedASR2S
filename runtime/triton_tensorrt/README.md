@@ -1,4 +1,4 @@
-# Accelerating FireRedASR-AED with TensorRT-LLM
+# Accelerating FireRedASR2-AED with TensorRT-LLM
 
 This guide covers two inference modes:
 1. **Offline Inference** - Direct local inference without server setup
